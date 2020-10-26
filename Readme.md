@@ -1,9 +1,12 @@
 # grpc源码学习
 **本项目个人阅读学习源码，持续更新，如果存在不足之处欢迎指正**
 ## Server 组件
-```
 
-  std::vector<std::shared_ptr<internal::ExternalConnectionAcceptorImpl>>
+<details>
+<summary>Server 组件</summary>
+
+```
+std::vector<std::shared_ptr<internal::ExternalConnectionAcceptorImpl>>
       acceptors_;
   // 拦截器
   std::vector<std::unique_ptr<experimental::ServerInterceptorFactoryInterface>>
@@ -52,5 +55,7 @@
   std::unique_ptr<internal::MethodHandler> generic_handler_;
   //已完成队列
   CompletionQueue* callback_cq_ /* GUARDED_BY(mu_) */ = nullptr;
-  std::vector<CompletionQueue*> cq_list_;
-  ```
+  std::vector<CompletionQueue*> cq_list_;</code></pre>
+```
+  
+</details>
