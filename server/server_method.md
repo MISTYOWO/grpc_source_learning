@@ -7,6 +7,17 @@
 <summary>start 方法</summary>
 
 ```
+
+// 逻辑:
+//   1. preServerStart，调用args 指定的预处理函数
+//   2. health_check_service初始化
+//   3. acceptors 依次初始化
+//   4. 如果需要，进行callback函数初始化，
+//   5. 启动server,(包装的grpc_core::server)
+//   6. 初始化需要的sync_req_mgrs_，UnimplementedAsyncRequest，
+//   UnimplementedAsyncRequestresource_exhausted_handler_
+//   7. 启动sync_req_mgrs_，StartServingThread，acceptors_ 
+
 void Server::Start(grpc::ServerCompletionQueue** cqs, size_t num_cqs) {
   GPR_ASSERT(!started_);
   global_callbacks_->PreServerStart(this);
@@ -92,4 +103,48 @@ void Server::Start(grpc::ServerCompletionQueue** cqs, size_t num_cqs) {
 }
 ```
 
+</details>
+
+**关注 grpc_core::server，sync_req_mgrs_，StartServingThread，acceptors_ 的start逻辑**
+
+<details>
+<summary>grpc_core::server start逻辑</summary>
+
+```
+/*
+  主要逻辑:
+    1. pollsets压入grpc_completion_queue中的cq
+    2. 依次启动listeners start
+    3. unregistered_request_matcher_ 和 RegisteredMethod match this (server)
+    4. starting_cv_信号释放
+*/
+
+void Server::Start() {
+  started_ = true;
+  for (grpc_completion_queue* cq : cqs_) {
+    if (grpc_cq_can_listen(cq)) {
+      pollsets_.push_back(grpc_cq_pollset(cq));
+    }
+  }
+  if (unregistered_request_matcher_ == nullptr) {
+    unregistered_request_matcher_ = absl::make_unique<RealRequestMatcher>(this);
+  }
+  for (std::unique_ptr<RegisteredMethod>& rm : registered_methods_) {
+    if (rm->matcher == nullptr) {
+      rm->matcher = absl::make_unique<RealRequestMatcher>(this);
+    }
+  }
+  {
+    MutexLock lock(&mu_global_);
+    starting_ = true;
+  }
+  for (auto& listener : listeners_) {
+    listener.listener->Start(this, &pollsets_);
+  }
+  MutexLock lock(&mu_global_);
+  starting_ = false;
+  starting_cv_.Signal();
+}
+
+```
 </details>
