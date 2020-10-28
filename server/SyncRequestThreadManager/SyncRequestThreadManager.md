@@ -10,6 +10,13 @@
   std::unique_ptr<grpc::internal::RpcServiceMethod> unknown_method_;
   std::shared_ptr<Server::GlobalCallbacks> global_callbacks_;
 ```
+## 继承关系
+
+class Server::SyncRequestThreadManager : public grpc::ThreadManager
+
+重点重写了DoWork和PollForWork方法
+
+![uml](../pic/grpc_SyncRequestThreadManager.png)
 
 ## 核心方法
 
@@ -288,5 +295,73 @@ static void cq_end_op_for_next(
 
   GRPC_ERROR_UNREF(error);
 }
+```
+</details>
+
+<details>
+<summary>
+PollForWork逻辑
+</summary>
+
+定时从server_cq中获取工作
+```
+WorkStatus PollForWork(void** tag, bool* ok) override {
+    *tag = nullptr;
+    // TODO(ctiller): workaround for GPR_TIMESPAN based deadlines not working
+    // right now
+    gpr_timespec deadline =
+        gpr_time_add(gpr_now(GPR_CLOCK_MONOTONIC),
+                     gpr_time_from_millis(cq_timeout_msec_, GPR_TIMESPAN));
+
+    switch (server_cq_->AsyncNext(tag, ok, deadline)) {
+      case grpc::CompletionQueue::TIMEOUT:
+        return TIMEOUT;
+      case grpc::CompletionQueue::SHUTDOWN:
+        return SHUTDOWN;
+      case grpc::CompletionQueue::GOT_EVENT:
+        return WORK_FOUND;
+    }
+
+    GPR_UNREACHABLE_CODE(return TIMEOUT);
+  }
+```
+</details>
+
+<details>
+
+<summary>
+DoWork逻辑
+</summary>
+
+PollForWork中获取tag，然后将tag封装成SyncRequest，然后将SyncRequest封装成CallData，然后调用CallData中的Run方法
+
+```
+  void DoWork(void* tag, bool ok, bool resources) override {
+    SyncRequest* sync_req = static_cast<SyncRequest*>(tag);
+
+    if (!sync_req) {
+      // No tag. Nothing to work on. This is an unlikley scenario and possibly a
+      // bug in RPC Manager implementation.
+      gpr_log(GPR_ERROR, "Sync server. DoWork() was called with NULL tag");
+      return;
+    }
+
+    if (ok) {
+      // Calldata takes ownership of the completion queue and interceptors
+      // inside sync_req
+      auto* cd = new SyncRequest::CallData(server_, sync_req);
+      // Prepare for the next request
+      if (!IsShutdown()) {
+        sync_req->SetupRequest();  // Create new completion queue for sync_req
+        sync_req->Request(server_->c_server(), server_cq_->cq());
+      }
+
+      GPR_TIMER_SCOPE("cd.Run()", 0);
+      cd->Run(global_callbacks_, resources);
+    }
+    // TODO (sreek) If ok is false here (which it isn't in case of
+    // grpc_request_registered_call), we should still re-queue the request
+    // object
+  }
 ```
 </details>
