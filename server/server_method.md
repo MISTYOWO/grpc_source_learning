@@ -156,7 +156,16 @@ sync_req_mgrs_ 封装了SyncRequestThreadManager的vector 的start逻辑
 <summary>
 
 ```
+void Start() {
+    if (!sync_requests_.empty()) {
+      for (const auto& value : sync_requests_) {
+        value->SetupRequest();
+        value->Request(server_->c_server(), server_cq_->cq());
+      }
 
+      Initialize();  // ThreadManager's Initialize()
+    }
+  }
 
 ```
 
